@@ -417,6 +417,8 @@ bool HttpRequest::set (char *url,int32_t offset,int32_t size,time_t ifModifiedSi
 	 //	 log("build: HttpRequest buf is too small.");
 	 //	 char *xx = NULL; *xx = 0;
 	 // }
+	 // debug it
+	 // log("hreq: %s",m_reqBuf.getBufStart());
 
 	 // restore url buffer
 	 if ( pathEnd ) *pathEnd = '?';
@@ -1548,8 +1550,8 @@ void HttpRequest::parseFieldsMultipart ( char *s , int32_t slen ) {
 	// Content-Disposition: form-data; name=\"file\"; filename=\"poo.txt\"\r\nContent-Type: text/plain\r\n\r\nsomething here\n=====\nagain we do it...
 	char *equal2 = strstr ( s , "\"" );
 	// debug point 
-	if ( strncmp(s,"file",4) == 0 )
-		log("hey");
+	// if ( strncmp(s,"file",4) == 0 )
+	// 	log("hey");
 	// so if we had that then we had an uploaded file
 	bool uploadedFile = false;
 	if ( equal2 && equal && equal2 <  equal ) {

@@ -1907,17 +1907,35 @@ int64_t gettimeofdayInMillisecondsSynced() {
 		char *xx = NULL; *xx = 0; }
 	// sanity check
 	if ( ! isClockInSync() ) { 
-		log("xml: clock not in sync with host #0 yet!!!!!!");
+		static int s_printed = 0;
+		if ( (s_printed % 100) == 0 ) {
+			s_printed++;
+			log("xml: clock not in sync with host #0 yet!!!!!!");
+		}
 		//char *xx = NULL; *xx = 0; }
 	}
-	//if ( ! g_clockInSync ) 
-	//	log("gb: Getting global time but clock not in sync.");
-	// this isn't async signal safe...
-	struct timeval tv;
-	gettimeofday ( &tv , NULL );
-	int64_t now=(int64_t)(tv.tv_usec/1000)+((int64_t)tv.tv_sec)*1000;
+
+	int64_t now;
+
+	// the real tiem sigalrm interrupt in Loop.cpp sets this to
+	// true once per millisecond
+	if ( ! g_clockNeedsUpdate ) {
+		now = g_now;
+	}
+	else {
+		//if ( ! g_clockInSync ) 
+		//	log("gb: Getting global time but clock not in sync.");
+		// this isn't async signal safe...
+		struct timeval tv;
+		gettimeofday ( &tv , NULL );
+		now = (int64_t)(tv.tv_usec/1000)+((int64_t)tv.tv_sec)*1000;
+	}
+
 	// update g_nowLocal
 	if ( now > g_now ) g_now = now;
+
+	g_clockNeedsUpdate = false;
+
 	// adjust from Msg0x11 time adjustments
 	now += s_adjustment;
 	// update g_now if it is more accurate
@@ -1990,6 +2008,12 @@ int64_t gettimeofdayInMilliseconds() {
 	//   from what it should be
 	//if ( now > g_now ) g_now = now;
 	return now;
+}
+
+
+int64_t gettimeofdayInMilliseconds_force ( ) {
+  g_clockNeedsUpdate = true;
+  return gettimeofdayInMilliseconds();
 }
 
 time_t getTime () {
@@ -2384,6 +2408,84 @@ char *serializeMsg ( int32_t  baseSize ,
 	return buf;
 }
 
+char *serializeMsg2 ( void *thisPtr ,
+		      int32_t objSize ,
+		      char **firstStrPtr ,
+		      int32_t *firstSizeParm ,
+		      int32_t *retSize ) {
+
+	// make a buffer to serialize into
+	char *buf  = NULL;
+	int32_t baseSize = (char *)firstStrPtr - (char *)thisPtr;
+	int nptrs=((char *)firstSizeParm-(char *)firstStrPtr)/sizeof(char *);
+	int32_t need = baseSize;
+	need += nptrs * sizeof(char *);
+	need += nptrs * sizeof(int32_t);
+	// tally up the string sizes
+	int32_t  *srcSizePtr = (int32_t *)firstSizeParm;
+	char **srcStrPtr  = (char **)firstStrPtr;
+	int32_t totalStringSizes = 0;
+	for ( int i = 0 ; i < nptrs ; i++ ) {
+		if ( srcStrPtr[i] == NULL ) continue;
+		totalStringSizes += srcSizePtr[i];
+
+	}
+	int32_t stringBufferOffset = need;
+	need += totalStringSizes;
+	// alloc if we should
+	if ( ! buf ) buf = (char *)mmalloc ( need , "sm2" );
+	// bail on error, g_errno should be set
+	if ( ! buf ) return NULL;
+	// set how many bytes we will serialize into
+	*retSize = need;
+	// copy everything over except strings themselves
+	char *p = buf;
+	gbmemcpy ( p , (char *)thisPtr , stringBufferOffset );//need );
+	// point to the string buffer
+	p += stringBufferOffset;
+	// then store the strings!
+	char **dstStrPtr = (char **)(buf + baseSize );
+	int32_t *dstSizePtr = (int32_t *)(buf + baseSize+sizeof(char *)*nptrs);
+	for ( int count = 0 ; count < nptrs ; count++ ) {
+		// copy ptrs
+		//*dstStrPtr = *srcStrPtr;
+		//*dstSizePtr = *srcSizePtr;
+		// if we are NULL, we are a "bookmark", so
+		// we alloc'd space for it, but don't copy into
+		// the space until after this call toe serialize()
+		if ( ! *srcStrPtr )
+			goto skip;
+		// if this is valid then size can't be 0! fix upstream.
+		if ( ! *srcSizePtr ) { char *xx=NULL;*xx=0; }
+		// if size is 0 use gbstrlen. helps with InjectionRequest
+		// where we set ptr_url or ptr_content but not size_url, etc.
+		//if ( ! *srcSizePtr )
+		//	*srcSizePtr = gbstrlen(*strPtr);
+		// sanity check -- cannot copy onto ourselves
+		if ( p > *srcStrPtr && p < *srcStrPtr + *srcSizePtr ) {
+			char *xx = NULL; *xx = 0; }
+		// copy the string into the buffer
+		gbmemcpy ( p , *srcStrPtr , *srcSizePtr );
+	skip:
+		// point it now into the string buffer
+		*dstStrPtr = p;
+		// if it is 0 length, make ptr NULL in destination
+		if ( *srcSizePtr == 0 || *srcStrPtr == NULL ) {
+			*dstStrPtr = NULL;
+			*dstSizePtr = 0;
+		}
+		// advance our destination ptr
+		p += *dstSizePtr;
+		// advance both ptrs to next string
+		srcSizePtr++;
+		srcStrPtr++;
+		dstSizePtr++;
+		dstStrPtr++;
+	}
+	return buf;
+}
+
+
 // convert offsets back into ptrs
 int32_t deserializeMsg ( int32_t  baseSize ,
 		      int32_t *firstSizeParm ,
@@ -2402,7 +2504,7 @@ int32_t deserializeMsg ( int32_t  baseSize ,
 		// make it NULL if size is 0 though
 		if ( *sizePtr == 0 ) *strPtr = NULL;
 		// sanity check
-		if ( *sizePtr < 0 ) { char *xx = NULL; *xx =0; }
+		if ( *sizePtr < 0 ) { g_errno = ECORRUPTDATA; return -1;}
 		// advance our destination ptr
 		p += *sizePtr;
 		// advance both ptrs to next string
@@ -2411,6 +2513,34 @@ int32_t deserializeMsg ( int32_t  baseSize ,
 	}
 	// return how many bytes we processed
 	return baseSize + (p - stringBuf);//getStringBuf());
+}
+
+bool deserializeMsg2 ( char    **firstStrPtr , // ptr_url
+		       int32_t  *firstSizeParm ) { // size_url
+	int nptrs=((char *)firstSizeParm-(char *)firstStrPtr)/sizeof(char *);
+	// point to our string buffer
+	char *p = ((char *)firstSizeParm + sizeof(int32_t)*nptrs);
+	// then store the strings!
+	int32_t  *sizePtr = firstSizeParm;//getFirstSizeParm(); // &size_qbuf;
+	//int32_t  *sizeEnd = lastSizeParm;//getLastSizeParm (); // &size_displ
+	char **strPtr  = firstStrPtr;//getFirstStrPtr  (); // &ptr_qbuf;
+	int count = 0;
+	for ( ; count < nptrs ; count++ ) { // sizePtr <= sizeEnd ;  ) {
+		// convert the offset to a ptr
+		*strPtr = p;
+		// make it NULL if size is 0 though
+		if ( *sizePtr == 0 ) *strPtr = NULL;
+		// sanity check
+		if ( *sizePtr < 0 ) return false;//{ char *xx = NULL; *xx =0; }
+		// advance our destination ptr
+		p += *sizePtr;
+		// advance both ptrs to next string
+		sizePtr++;
+		strPtr++;
+	}
+	// return how many bytes we processed
+	//return baseSize + (p - stringBuf);//getStringBuf());
+	return true;
 }
 
 // print it to stdout for debugging Dates.cpp
@@ -2489,4 +2619,3 @@ bool verifyUtf8 ( char *txt ) {
 	int32_t tlen = gbstrlen(txt);
 	return verifyUtf8(txt,tlen);
 }
-

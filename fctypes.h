@@ -177,6 +177,7 @@ int64_t gettimeofdayInMillisecondsSynced() ; // synced with host #0
 int64_t gettimeofdayInMillisecondsLocal () ;// this is local now
 int64_t gettimeofdayInMilliseconds() ;// this is local now
 uint64_t gettimeofdayInMicroseconds(void) ;
+int64_t gettimeofdayInMilliseconds_force ( ) ;
 
 // . get time in seconds since epoch
 // . use this instead of call to time(NULL) cuz it uses adjustment
@@ -236,7 +237,7 @@ bool saveTimeAdjustment ( ) ;
 #define is_hspace_a(c)         g_map_is_hspace[(unsigned char)c]
 #define is_ascii(c)           g_map_is_ascii[(unsigned char)c]
 #define is_ascii9(c)           g_map_is_ascii[(unsigned char)c]
-#define is_ascii3(c)           g_map_is_ascii3[(unsigned char)c]
+#define is_ascii3(c)           ((unsigned char)c<128 || g_map_is_ascii3[(unsigned char)c])
 #define is_punct_a(c)          g_map_is_punct[(unsigned char)c]
 #define is_alnum_a(c)          g_map_is_alnum[(unsigned char)c]
 #define is_alpha_a(c)          g_map_is_alpha[(unsigned char)c]
@@ -611,11 +612,21 @@ char *serializeMsg ( int32_t  baseSize ,
 		     char *userBuf     ,
 		     int32_t  userBufSize ,
 		     bool  makePtrsRefNewBuf ) ;
+
+char *serializeMsg2 ( void *thisPtr ,
+		      int32_t objSize ,
+		      char **firstStrPtr ,
+		      int32_t *firstSizeParm ,
+		      int32_t *retSize );
+
 // convert offsets back into ptrs
+// returns -1 on error
 int32_t deserializeMsg ( int32_t  baseSize ,
 		      int32_t *firstSizeParm ,
 		      int32_t *lastSizeParm ,
 		      char **firstStrPtr ,
 		      char *stringBuf ) ;
+
+bool deserializeMsg2 ( char **firstStrPtr , int32_t  *firstSizeParm );
 
 #endif 

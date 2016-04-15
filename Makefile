@@ -4,13 +4,13 @@ uname_m = $(shell uname -m)
 ARCH=$(uname_m)
 
 # for building packages
-VERSION=19
+VERSION=20
 
 CC=g++
 
 # remove dlstubs.o for CYGWIN
 OBJS =  UdpSlot.o Rebalance.o \
-	Msg13.o Mime.o IndexReadInfo.o \
+	Msg13.o Mime.o \
 	PageGet.o PageHosts.o \
 	PageParser.o PageInject.o PagePerf.o PageReindex.o PageResults.o \
 	PageAddUrl.o PageRoot.o PageSockets.o PageStats.o \
@@ -32,7 +32,7 @@ OBJS =  UdpSlot.o Rebalance.o \
 	Msg39.o Msg3.o \
 	Msg22.o \
 	Msg20.o Msg2.o \
-	Msg1.o Msg35.o \
+	Msg1.o \
 	Msg0.o Mem.o Matches.o Loop.o \
 	Log.o Lang.o \
 	Indexdb.o Posdb.o Clusterdb.o IndexList.o Revdb.o \
@@ -41,7 +41,7 @@ OBJS =  UdpSlot.o Rebalance.o \
 	Highlight.o File.o Errno.o Entities.o \
 	Dns.o Dir.o Conf.o Bits.o \
 	Stats.o BigFile.o Msg17.o \
-	Speller.o DiskPageCache.o \
+	Speller.o \
 	PingServer.o StopWords.o TopTree.o \
 	Parms.o Pages.o \
 	Unicode.o iana_charset.o Iso8859.o \
@@ -67,7 +67,7 @@ OBJS =  UdpSlot.o Rebalance.o \
 	Dates.o Sections.o SiteGetter.o Syncdb.o qa.o \
 	Placedb.o Address.o Test.o GeoIP.o GeoIPCity.o Synonyms.o \
 	Cachedb.o Monitordb.o dlstubs.o PageCrawlBot.o Json.o PageBasic.o \
-	Version.o
+	Punycode.o Version.o
 
 CHECKFORMATSTRING = -D_CHECK_FORMAT_STRING_
 
@@ -83,9 +83,18 @@ FFF = /etc/redhat-release
 ifneq ($(wildcard $(FFF)),)
 OS_RHEL := true
 STATIC :=
+XMLDOCOPT := -O2
 else
 OS_DEB := true
-STATIC := -static
+# let's remove static now by default to be safe because we don't always
+# detect red hat installs like on aws. do 'make static' to make as static.
+#STATIC := -static
+STATIC :=
+# MDW: i get some parsing inconsistencies when running the first qa injection
+# test if this is -O3. strange.
+# now debian jesse doesn't like -O3, it will core right away when spidering
+# so change this to -O2 from -O3 as well.
+XMLDOCOPT := -O2
 endif
 
 
@@ -104,11 +113,13 @@ LIBS = ./libz.a ./libssl.a ./libcrypto.a ./libiconv.a ./libm.a
 # are we a 32-bit architecture? use different libraries then
 else ifeq ($(ARCH), i686)
 CPPFLAGS= -m32 -g -Wall -pipe -fno-stack-protector -Wno-write-strings -Wstrict-aliasing=0 -Wno-uninitialized -DPTHREADS -Wno-unused-but-set-variable $(STATIC)
-LIBS= -L. ./libz.a ./libssl.a ./libcrypto.a ./libiconv.a ./libm.a ./libstdc++.a -lpthread
+#LIBS= -L. ./libz.a ./libssl.a ./libcrypto.a ./libiconv.a ./libm.a ./libstdc++.a -lpthread
+LIBS=  -lm -lpthread -lssl -lcrypto ./libiconv.a ./libz.a
 
 else ifeq ($(ARCH), i386)
 CPPFLAGS= -m32 -g -Wall -pipe -fno-stack-protector -Wno-write-strings -Wstrict-aliasing=0 -Wno-uninitialized -DPTHREADS -Wno-unused-but-set-variable $(STATIC)
-LIBS= -L. ./libz.a ./libssl.a ./libcrypto.a ./libiconv.a ./libm.a ./libstdc++.a -lpthread
+#LIBS= -L. ./libz.a ./libssl.a ./libcrypto.a ./libiconv.a ./libm.a ./libstdc++.a -lpthread
+LIBS=  -lm -lpthread -lssl -lcrypto ./libiconv.a ./libz.a
 
 else
 #
@@ -173,11 +184,19 @@ vclean:
 	@echo ""
 	@echo "sudo yum install gcc-c++"
 	@echo ""
+	@echo ""
+	@echo "If make fails on CentOS then first run:"
+	@echo ""
+	@echo "sudo yum install gcc-c++ openssl-devel"
+	@echo ""
 	@echo "*****"
 	@echo ""
 
 gb: vclean $(OBJS) main.o $(LIBFILES)
 	$(CC) $(DEFS) $(CPPFLAGS) -o $@ main.o $(OBJS) $(LIBS)
+
+static: vclean $(OBJS) main.o $(LIBFILES)
+	$(CC) $(DEFS) $(CPPFLAGS) -static -o gb main.o $(OBJS) $(LIBS)
 
 
 # use this for compiling on CYGWIN: 
@@ -384,11 +403,11 @@ Linkdb.o:
 	$(CC) $(DEFS) $(CPPFLAGS) -O3 -c $*.cpp 
 
 XmlDoc.o:
-	$(CC) $(DEFS) $(CPPFLAGS) -O3 -c $*.cpp 
+	$(CC) $(DEFS) $(CPPFLAGS) $(XMLDOCOPT) -c $*.cpp 
 
 # final gigabit generation in here:
 Msg40.o:
-	$(CC) $(DEFS) $(CPPFLAGS) -O3 -c $*.cpp 
+	$(CC) $(DEFS) $(CPPFLAGS) -O2 -c $*.cpp 
 
 seo.o:
 	$(CC) $(DEFS) $(CPPFLAGS) -O3 -c $*.cpp 
@@ -513,6 +532,10 @@ Timedb.o:
 HashTableX.o:
 	$(CC) $(DEFS) $(CPPFLAGS)  -O2 -c $*.cpp 
 
+# getUrlFilterNum2()
+Spider.o:
+	$(CC) $(DEFS) $(CPPFLAGS)  -O2 -c $*.cpp 
+
 SpiderCache.o:
 	$(CC) $(DEFS) $(CPPFLAGS)  -O2 -c $*.cpp 
 
@@ -611,17 +634,17 @@ depend:
 # move this tarball into ~/rpmbuild/?????
 # then run rpmbuild -ba gb-1.0.spec to build the rpms
 # rpm -ivh gb-1.0-...  to install the pkg
-testing-rpm:
-	git archive --format=tar --prefix=gb-1.0/ testing > gb-1.0.tar
-	mv gb-1.0.tar /home/mwells/rpmbuild/SOURCES/
-	rpmbuild -bb gb-1.0.spec
-	scp /home/mwells/rpmbuild/RPMS/x86_64/gb-*rpm www.gigablast.com:/w/html/
+# testing-rpm:
+# 	git archive --format=tar --prefix=gb-1.0/ testing > gb-1.0.tar
+# 	mv gb-1.0.tar /home/mwells/rpmbuild/SOURCES/
+# 	rpmbuild -bb gb-1.0.spec
+# 	scp /home/mwells/rpmbuild/RPMS/x86_64/gb-*rpm www.gigablast.com:/w/html/
 
-master-rpm:
-	git archive --format=tar --prefix=gb-1.0/ master > gb-1.0.tar
-	mv gb-1.0.tar /home/mwells/rpmbuild/SOURCES/
-	rpmbuild -bb gb-1.0.spec
-	scp /home/mwells/rpmbuild/RPMS/x86_64/gb-*rpm www.gigablast.com:/w/html/
+# master-rpm:
+# 	git archive --format=tar --prefix=gb-1.0/ master > gb-1.0.tar
+# 	mv gb-1.0.tar /home/mwells/rpmbuild/SOURCES/
+# 	rpmbuild -bb gb-1.0.spec
+# 	scp /home/mwells/rpmbuild/RPMS/x86_64/gb-*rpm www.gigablast.com:/w/html/
 
 # REDHAT PACKAGE SECTION END
 
@@ -633,7 +656,7 @@ master-deb32:
 	git archive --format=tar --prefix=gb-1.$(VERSION)/ master > ../gb_1.$(VERSION).orig.tar
 	rm -rf debian
 # change "-p gb_1.0" to "-p gb_1.1" to update version for example
-	dh_make -s -e gigablast@mail.com -p gb_1.$(VERSION) -f ../gb_1.$(VERSION).orig.tar
+	dh_make -y -s -e gigablast@mail.com -p gb_1.$(VERSION) -f ../gb_1.$(VERSION).orig.tar
 # zero this out, it is just filed with the .txt files erroneously and it'll
 # try to automatiicaly install in /usr/docs/
 	rm debian/docs
@@ -677,7 +700,7 @@ master-deb64:
 	git archive --format=tar --prefix=gb-1.$(VERSION)/ master > ../gb_1.$(VERSION).orig.tar
 	rm -rf debian
 # change "-p gb_1.0" to "-p gb_1.1" to update version for example
-	dh_make -s -e gigablast@mail.com -p gb_1.$(VERSION) -f ../gb_1.$(VERSION).orig.tar
+	dh_make -y -s -e gigablast@mail.com -p gb_1.$(VERSION) -f ../gb_1.$(VERSION).orig.tar
 # zero this out, it is just filed with the .txt files erroneously and it'll
 # try to automatiicaly install in /usr/docs/
 	rm debian/docs
@@ -759,4 +782,11 @@ install-pkgs-local:
 
 # DEBIAN PACKAGE SECTION END
 
+
+# You may need:
+# sudo apt-get install libffi-dev libssl-dev
+warcinjector: 
+	-rm -r /home/zak/.pex/build/inject-*
+	-rm -r /home/zak/.pex/install/inject-*
+	cd script && pex -v . gevent gevent-socketio requests pyopenssl ndg-httpsclient pyasn1 multiprocessing -e inject -o warc-inject --inherit-path --no-wheel
 
